@@ -1,0 +1,534 @@
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: ${param:resourceprefix}cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+#  RedisCluster:
+#    Type: AWS::ElastiCache::CacheCluster
+#    Properties:
+#      ClusterName: ${param:resourceprefix}cluster
+#      CacheNodeType: cache.t3.micro
+#      Engine: redis
+#      EngineVersion: 6.2
+#      NumCacheNodes: 1
+#      CacheSubnetGroupName: !ImportValue ${param:mainStackName}SubnetGroup
+#      VpcSecurityGroupIds:
+#        - !ImportValue ${param:mainStackName}InternalSecurityGroup
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ${param:resourceprefix}ecs-exec
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                  - sqs:*
+                  - s3:*
+                  - secretsmanager:GetSecretValue
+                  - kms:Decrypt
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${param:resourcenamespace}
+
+  FargateService:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerListener
+    Properties:
+      ServiceName: !Sub ${param:resourceprefix}api-service
+      Cluster: !Ref ECSCluster
+      DesiredCount: ${param:serviceDesiredCount}
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: True
+          Rollback: True
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: app
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !ImportValue ${param:mainStackName}InternalSecurityGroup
+          Subnets:
+            - !ImportValue ${param:mainStackName}SubnetAPrivate
+            - !ImportValue ${param:mainStackName}SubnetBPrivate
+            - !ImportValue ${param:mainStackName}SubnetCPrivate
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${param:resourceprefix}app
+      Memory: ${param:appTaskDifinitionMemory}
+      Cpu: ${param:appTaskDifinitionCpu}
+      ExecutionRoleArn: !Ref TaskExecutionRole
+      TaskRoleArn: !Ref TaskExecutionRole
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+        - Name: app
+          Image: !Join
+            - ''
+            - - !Ref AWS::AccountId
+              - '.dkr.ecr.'
+              - !Ref AWS::Region
+              - '.amazonaws.com/${param:resourceprefix}app'
+          Essential: true
+#          Environment:
+#            - Name: S3_REGION
+#              Value: eu-west-1
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: app
+          PortMappings:
+            - ContainerPort: 3000
+              HostPort: 3000
+              Protocol: tcp
+
+  #        - Name: nginx
+#          Image: !Join
+#            - ''
+#            - - !Ref AWS::AccountId
+#              - '.dkr.ecr.'
+#              - !Ref AWS::Region
+#              - '.amazonaws.com/${param:resourceprefix}nginx'
+#          Essential: true
+#          PortMappings:
+#            - ContainerPort: 80
+#              HostPort: 80
+#              Protocol: tcp
+
+  RespositoryApp:
+    Type: AWS::ECR::Repository
+    # DeletionPolicy: Retain
+    Properties:
+      RepositoryName: !Sub ${param:resourceprefix}app
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":10,"description":"Remove untagged docker images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":1},"action":{"type":"expire"}},{"rulePriority":100,"description":"keep latest 5 versions only","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
+
+#  RespositoryNginx:
+#    Type: AWS::ECR::Repository
+#    # DeletionPolicy: Retain
+#    Properties:
+#      RepositoryName: !Sub ${param:resourceprefix}nginx
+#      LifecyclePolicy:
+#        LifecyclePolicyText: '{"rules":[{"rulePriority":10,"description":"Remove untagged docker images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":1},"action":{"type":"expire"}},{"rulePriority":100,"description":"keep latest 5 versions only","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
+#
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ${param:resourceprefix}codebuild-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - secretsmanager:*
+                  - codebuild:*
+                  - cloudfront:CreateInvalidation
+                  - s3:*
+                  - ec2:*
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ${param:resourceprefix}codepiple-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                  - ecs:RegisterTaskDefinition
+                  - ecs:UpdateService
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - iam:PassRole
+                  - codestar-connections:*
+                  - codestar:*
+                  - s3:*
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            variables:
+              APP_IMAGE_NAME: ${param:resourceprefix}app
+          phases:
+            install:
+              runtime-versions:
+                node: 16
+              commands:
+                - cat Dockerfile
+            pre_build:
+              commands:
+                - npm install
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REPOSITORY_URI
+                - IMAGE_TAG="$(date '+%Y%m%d')"_"$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 7)"
+                - echo $IMAGE_TAG
+            build:
+              commands:
+                # - docker pull "$REPOSITORY_URI/$APP_IMAGE_NAME:latest" -q || true
+                - APP_IMAGE_URI="$REPOSITORY_URI/$APP_IMAGE_NAME:$IMAGE_TAG"
+                # - docker build -t "$APP_IMAGE_URI" --cache-from "$REPOSITORY_URI/$APP_IMAGE_NAME:latest" -q .
+                - docker build -t "$APP_IMAGE_URI" .
+            post_build:
+              commands:
+                - docker push "$APP_IMAGE_URI"
+                - printf '[{"name":"app","imageUri":"%s"}]' "$APP_IMAGE_URI" > images.json
+          artifacts:
+            files:
+              - images.json
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:6.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+#          - Name: QUEUE_SQS_DEFAULT
+#            Value: !Ref DefaultQueue
+#          - Name: QUEUE_SQS_HIGH
+#            Value: !Ref HighQueue
+#          - Name: QUEUE_SQS_LOW
+#            Value: !Ref LowQueue
+#          - Name: QUEUE_SQS_FINANCE
+#            Value: !Ref FinanceQueue
+#          - Name: QUEUE_SQS_ROBOCALL
+#            Value: !Ref RobocallQueue
+#          - Name: LOAD_BALANCER_URL
+#            Value: !GetAtt LoadBalancer.DNSName
+          - Name: REPOSITORY_URI
+            Value: !Join
+              - ''
+              - - !Ref AWS::AccountId
+                - '.dkr.ecr.'
+                - !Ref AWS::Region
+                - '.amazonaws.com'
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue ${param:mainStackName}InternalSecurityGroup
+        Subnets:
+          - !ImportValue ${param:mainStackName}SubnetAPrivate
+          - !ImportValue ${param:mainStackName}SubnetBPrivate
+          - !ImportValue ${param:mainStackName}SubnetCPrivate
+        VpcId: !ImportValue ${param:mainStackName}VPC
+      Name: !Sub ${param:resourceprefix}build
+      ServiceRole: !Ref CodeBuildServiceRole
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${param:resourceprefix}app
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !ImportValue ${param:mainStackName}ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: "omarshrbaji96"
+                Repo: "aisight"
+                Branch: ${param:githubBranch}
+                OAuthToken: ${param:githubToken}
+#                ConnectionArn: !ImportValue ${param:mainStackName}BitbucketConnection
+#                FullRepositoryId: toters/toters-api
+#                BranchName: ${param:githubBranch}
+              OutputArtifacts:
+                - Name: App
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: App
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployApp
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName: !Ref ECSCluster
+                ServiceName: !Ref FargateService
+                FileName: images.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: ${param:resourceprefix}alb
+      GroupName: !Sub ${param:resourceprefix}alb
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          IpProtocol: 'TCP'
+          FromPort: 0
+          ToPort: 65535
+      VpcId: !ImportValue ${param:mainStackName}VPC
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ${param:resourcenamespace}-lb
+      Scheme: internet-facing
+      Subnets:
+        - !ImportValue ${param:mainStackName}SubnetAPublic
+        - !ImportValue ${param:mainStackName}SubnetBPublic
+        - !ImportValue ${param:mainStackName}SubnetCPublic
+      SecurityGroups:
+        - !Ref SecurityGroup
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+#    DependsOn: HttpsListener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+
+
+#  HttpsListener:
+#    Type: AWS::ElasticLoadBalancingV2::Listener
+#    Properties:
+#      Certificates:
+#        - CertificateArn: !ImportValue ${param:mainStackName}Certificate
+#      DefaultActions:
+#        - TargetGroupArn: !Ref TargetGroup
+#          Type: forward
+#      LoadBalancerArn: !Ref LoadBalancer
+#      Port: 443
+#      Protocol: HTTP
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancer
+    Properties:
+      Name: ${param:resourcenamespace}-tg
+      VpcId: !ImportValue ${param:mainStackName}VPC
+      Port: 3000
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckPath: /
+      TargetType: ip
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+#  DefaultQueue:
+#    Type: AWS::SQS::Queue
+#    Properties:
+#      QueueName: ${param:resourcenamespace}-default
+#      ReceiveMessageWaitTimeSeconds: 20 # long polling
+#      VisibilityTimeout: 60 # default is 30, need to ask about it
+
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ${param:resourcenamespace}-high
+      ReceiveMessageWaitTimeSeconds: 20 # long polling
+      VisibilityTimeout: 60 # default is 30, need to ask about it
+
+
+  ECSScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 2
+      MinCapacity: 1
+      RoleARN:
+        Fn::Sub: 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/cassandra.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_CassandraTable'
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Join
+        - /
+        - - service
+          - !Ref ECSCluster
+          - !GetAtt FargateService.Name
+
+  ServiceScalingPolicyCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${param:resourceprefix}cpu
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60.0
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+
+  # ECSAutoScalingGroup:
+  #   Type: AWS::AutoScaling::AutoScalingGroup
+  #   Properties:
+  #     VPCZoneIdentifier:
+  #       - !ImportValue ${param:mainStackName}SubnetAPrivate
+  #       - !ImportValue ${param:mainStackName}SubnetBPrivate
+  #       - !ImportValue ${param:mainStackName}SubnetCPrivate
+  #     LaunchConfigurationName: !Ref "ContainerInstances"
+  #     MinSize: 0
+  #     MaxSize: 1
+  #     DesiredCapacity: 1
+  #   CreationPolicy:
+  #     ResourceSignal:
+  #       Timeout: PT15M
+  #   UpdatePolicy:
+  #     AutoScalingReplacingUpdate:
+  #       WillReplace: "true"
+  # ContainerInstances:
+  #   Type: AWS::AutoScaling::LaunchConfiguration
+  #   Properties:
+  #     ImageId: ami-0bfc7754dbd389d88 #/aws/service/ami-amazon-linux-latest/al2022-ami-kernel-default-x86_64
+  #     SecurityGroups:
+  #       - !ImportValue ${param:mainStackName}InternalSecurityGroup
+  #     InstanceType: c5.xlarge
+  #     IamInstanceProfile: !Ref "EC2InstanceProfile"
+  #     UserData:
+  #       Fn::Base64: !Sub |
+  #         #!/bin/bash -xe
+  #         echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+  #         yum install -y aws-cfn-bootstrap
+  #         /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ECSAutoScalingGroup --region ${AWS::Region}
+  # EC2InstanceProfile:
+  #   Type: AWS::IAM::InstanceProfile
+  #   Properties:
+  #     Path: /
+  #     Roles: [!Ref "EC2Role"]
+  # EC2Role:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: [ec2.amazonaws.com]
+  #           Action: ["sts:AssumeRole"]
+  #     Path: /
+  #     Policies:
+  #       - PolicyName: ecs-service
+  #         PolicyDocument:
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - "ecs:CreateCluster"
+  #                 - "ecs:DeregisterContainerInstance"
+  #                 - "ecs:DiscoverPollEndpoint"
+  #                 - "ecs:Poll"
+  #                 - "ecs:RegisterContainerInstance"
+  #                 - "ecs:StartTelemetrySession"
+  #                 - "ecs:Submit*"
+  #                 - "logs:CreateLogStream"
+  #                 - "logs:PutLogEvents"
+  #                 - "ecr:GetAuthorizationToken"
+  #                 - "ecr:BatchGetImage"
+  #                 - "ecr:GetDownloadUrlForLayer"
+  #                 - ssm:*
+  #                 - ec2:*
+  #               Resource: "*"

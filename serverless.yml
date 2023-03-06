@@ -1,0 +1,62 @@
+service: main
+
+provider:
+  name: aws
+  stage: ${env:RELEASE_STAGE, 'aisight'}
+  region: ${env:AWS_REGION, 'eu-west-1'}
+
+params:
+  default:
+    vpcSecondDigitCidrBlock: 10
+    resourcenamespace: '${self:service}-${sls:stage}'
+    resourceprefix: '${param:resourcenamespace}-'
+    rootDomain: dev.toters-api.dev
+
+resources:
+  - ${file(resources/vpc.yml)}
+  - ${file(resources/resources.yml)}
+  - Outputs:
+      RESOURCENAMESPACE:
+        Value: ${param:resourcenamespace}
+        Export:
+          Name: RESOURCE-NAMESPACE
+      VpcOutput:
+        Value: !Ref VPC
+        Export:
+          Name: ${sls:stage}-VPC
+      SubnetAPublic:
+        Value: !Ref SubnetAPublic
+        Export:
+          Name: ${sls:stage}-SubnetAPublic
+      SubnetAPrivate:
+        Value: !Ref SubnetAPrivate
+        Export:
+          Name: ${sls:stage}-SubnetAPrivate
+      SubnetBPublic:
+        Value: !Ref SubnetBPublic
+        Export:
+          Name: ${sls:stage}-SubnetBPublic
+      SubnetBPrivate:
+        Value: !Ref SubnetBPrivate
+        Export:
+          Name: ${sls:stage}-SubnetBPrivate
+      SubnetCPublic:
+        Value: !Ref SubnetCPublic
+        Export:
+          Name: ${sls:stage}-SubnetCPublic
+      SubnetCPrivate:
+        Value: !Ref SubnetCPrivate
+        Export:
+          Name: ${sls:stage}-SubnetCPrivate
+      SourceSecurityGroup:
+        Value: !Ref SourceSecurityGroup
+        Export:
+          Name: ${sls:stage}-InternalSecurityGroup
+      SubnetGroup:
+        Value: !Ref SubnetGroup
+        Export:
+          Name: ${sls:stage}-SubnetGroup
+      ArtifactBucket:
+        Value: !Ref ArtifactBucket
+        Export:
+          Name: ${sls:stage}-ArtifactBucket
