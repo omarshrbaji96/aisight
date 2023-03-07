@@ -237,7 +237,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                node: 16
+                nodejs: 16
               commands:
                 - cat Dockerfile
             pre_build:
