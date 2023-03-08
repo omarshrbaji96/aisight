@@ -14,7 +14,7 @@ params:
     githubBranch: 'master'
     githubToken: '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'
     mainStackName: aisight-
-    serviceDesiredCount: ${env:SERVICE_COUNT, 0}
+    serviceDesiredCount: ${env:SERVICE_COUNT, 1}
 #    virginiaCertificateArn: arn:aws:acm:us-east-1:704225478571:certificate/b830bbdc-ea9a-43d1-8fab-432a9890a82e
 
     appTaskDifinitionCpu: 0.5vCPU
