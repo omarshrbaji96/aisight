@@ -12,7 +12,7 @@ params:
     githubBranch: 'master'
     githubToken: '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'
     mainStackName: aisight13-
-    serviceDesiredCount: ${env:SERVICE_COUNT, 0}
+    serviceDesiredCount: ${env:SERVICE_COUNT, 1}
     appTaskDifinitionCpu: 0.5vCPU
     appTaskDifinitionMemory: 1GB
 
