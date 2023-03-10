@@ -7,18 +7,6 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
-#  RedisCluster:
-#    Type: AWS::ElastiCache::CacheCluster
-#    Properties:
-#      ClusterName: ${param:resourceprefix}cluster
-#      CacheNodeType: cache.t3.micro
-#      Engine: redis
-#      EngineVersion: 6.2
-#      NumCacheNodes: 1
-#      CacheSubnetGroupName: !ImportValue ${param:mainStackName}SubnetGroup
-#      VpcSecurityGroupIds:
-#        - !ImportValue ${param:mainStackName}InternalSecurityGroup
-
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -78,7 +66,7 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
-            - !ImportValue ${param:mainStackName}InternalSecurityGroup
+            - !Ref SourceSecurityGroup
           Subnets:
             - !ImportValue ${param:mainStackName}SubnetAPrivate
             - !ImportValue ${param:mainStackName}SubnetBPrivate
@@ -100,13 +88,8 @@ Resources:
           Image: !Join
             - ''
             - - !Ref AWS::AccountId
-              - '.dkr.ecr.'
               - !Ref AWS::Region
-              - '.amazonaws.com/${param:resourceprefix}app'
           Essential: true
-#          Environment:
-#            - Name: S3_REGION
-#              Value: eu-west-1
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -118,35 +101,12 @@ Resources:
               HostPort: 3000
               Protocol: tcp
 
-  #        - Name: nginx
-#          Image: !Join
-#            - ''
-#            - - !Ref AWS::AccountId
-#              - '.dkr.ecr.'
-#              - !Ref AWS::Region
-#              - '.amazonaws.com/${param:resourceprefix}nginx'
-#          Essential: true
-#          PortMappings:
-#            - ContainerPort: 80
-#              HostPort: 80
-#              Protocol: tcp
-
   RespositoryApp:
     Type: AWS::ECR::Repository
-    # DeletionPolicy: Retain
     Properties:
       RepositoryName: !Sub ${param:resourceprefix}app
       LifecyclePolicy:
         LifecyclePolicyText: '{"rules":[{"rulePriority":10,"description":"Remove untagged docker images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":1},"action":{"type":"expire"}},{"rulePriority":100,"description":"keep latest 5 versions only","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
-
-#  RespositoryNginx:
-#    Type: AWS::ECR::Repository
-#    # DeletionPolicy: Retain
-#    Properties:
-#      RepositoryName: !Sub ${param:resourceprefix}nginx
-#      LifecyclePolicy:
-#        LifecyclePolicyText: '{"rules":[{"rulePriority":10,"description":"Remove untagged docker images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":1},"action":{"type":"expire"}},{"rulePriority":100,"description":"keep latest 5 versions only","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
-#
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -267,28 +227,14 @@ Resources:
         EnvironmentVariables:
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
-#          - Name: QUEUE_SQS_DEFAULT
-#            Value: !Ref DefaultQueue
-#          - Name: QUEUE_SQS_HIGH
-#            Value: !Ref HighQueue
-#          - Name: QUEUE_SQS_LOW
-#            Value: !Ref LowQueue
-#          - Name: QUEUE_SQS_FINANCE
-#            Value: !Ref FinanceQueue
-#          - Name: QUEUE_SQS_ROBOCALL
-#            Value: !Ref RobocallQueue
-#          - Name: LOAD_BALANCER_URL
-#            Value: !GetAtt LoadBalancer.DNSName
           - Name: REPOSITORY_URI
             Value: !Join
               - ''
               - - !Ref AWS::AccountId
-                - '.dkr.ecr.'
                 - !Ref AWS::Region
-                - '.amazonaws.com'
       VpcConfig:
         SecurityGroupIds:
-          - !ImportValue ${param:mainStackName}InternalSecurityGroup
+          - !Ref SourceSecurityGroup
         Subnets:
           - !ImportValue ${param:mainStackName}SubnetAPrivate
           - !ImportValue ${param:mainStackName}SubnetBPrivate
@@ -304,7 +250,7 @@ Resources:
       RoleArn: !GetAtt CodePipelineServiceRole.Arn
       ArtifactStore:
         Type: S3
-        Location: !ImportValue ${param:mainStackName}ArtifactBucket
+        Location: !Ref ArtifactBucket
       Stages:
         - Name: Source
           Actions:
@@ -319,9 +265,6 @@ Resources:
                 Repo: "aisight"
                 Branch: ${param:githubBranch}
                 OAuthToken: ${param:githubToken}
-#                ConnectionArn: !ImportValue ${param:mainStackName}BitbucketConnection
-#                FullRepositoryId: toters/toters-api
-#                BranchName: ${param:githubBranch}
               OutputArtifacts:
                 - Name: App
               RunOrder: 1
@@ -382,7 +325,6 @@ Resources:
 
   LoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
-#    DependsOn: HttpsListener
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
@@ -390,19 +332,6 @@ Resources:
       DefaultActions:
         - TargetGroupArn: !Ref TargetGroup
           Type: forward
-
-
-#  HttpsListener:
-#    Type: AWS::ElasticLoadBalancingV2::Listener
-#    Properties:
-#      Certificates:
-#        - CertificateArn: !ImportValue ${param:mainStackName}Certificate
-#      DefaultActions:
-#        - TargetGroupArn: !Ref TargetGroup
-#          Type: forward
-#      LoadBalancerArn: !Ref LoadBalancer
-#      Port: 443
-#      Protocol: HTTP
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -420,21 +349,12 @@ Resources:
         - Key: deregistration_delay.timeout_seconds
           Value: 30
 
-#  DefaultQueue:
-#    Type: AWS::SQS::Queue
-#    Properties:
-#      QueueName: ${param:resourcenamespace}-default
-#      ReceiveMessageWaitTimeSeconds: 20 # long polling
-#      VisibilityTimeout: 60 # default is 30, need to ask about it
-
-
   Queue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: ${param:resourcenamespace}-high
-      ReceiveMessageWaitTimeSeconds: 20 # long polling
-      VisibilityTimeout: 60 # default is 30, need to ask about it
-
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 60
 
   ECSScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
@@ -464,71 +384,20 @@ Resources:
         PredefinedMetricSpecification:
           PredefinedMetricType: ECSServiceAverageCPUUtilization
 
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${param:resourceprefix}artifact-bucket
 
-  # ECSAutoScalingGroup:
-  #   Type: AWS::AutoScaling::AutoScalingGroup
-  #   Properties:
-  #     VPCZoneIdentifier:
-  #       - !ImportValue ${param:mainStackName}SubnetAPrivate
-  #       - !ImportValue ${param:mainStackName}SubnetBPrivate
-  #       - !ImportValue ${param:mainStackName}SubnetCPrivate
-  #     LaunchConfigurationName: !Ref "ContainerInstances"
-  #     MinSize: 0
-  #     MaxSize: 1
-  #     DesiredCapacity: 1
-  #   CreationPolicy:
-  #     ResourceSignal:
-  #       Timeout: PT15M
-  #   UpdatePolicy:
-  #     AutoScalingReplacingUpdate:
-  #       WillReplace: "true"
-  # ContainerInstances:
-  #   Type: AWS::AutoScaling::LaunchConfiguration
-  #   Properties:
-  #     ImageId: ami-0bfc7754dbd389d88 #/aws/service/ami-amazon-linux-latest/al2022-ami-kernel-default-x86_64
-  #     SecurityGroups:
-  #       - !ImportValue ${param:mainStackName}InternalSecurityGroup
-  #     InstanceType: c5.xlarge
-  #     IamInstanceProfile: !Ref "EC2InstanceProfile"
-  #     UserData:
-  #       Fn::Base64: !Sub |
-  #         #!/bin/bash -xe
-  #         echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
-  #         yum install -y aws-cfn-bootstrap
-  #         /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ECSAutoScalingGroup --region ${AWS::Region}
-  # EC2InstanceProfile:
-  #   Type: AWS::IAM::InstanceProfile
-  #   Properties:
-  #     Path: /
-  #     Roles: [!Ref "EC2Role"]
-  # EC2Role:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     AssumeRolePolicyDocument:
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Service: [ec2.amazonaws.com]
-  #           Action: ["sts:AssumeRole"]
-  #     Path: /
-  #     Policies:
-  #       - PolicyName: ecs-service
-  #         PolicyDocument:
-  #           Statement:
-  #             - Effect: Allow
-  #               Action:
-  #                 - "ecs:CreateCluster"
-  #                 - "ecs:DeregisterContainerInstance"
-  #                 - "ecs:DiscoverPollEndpoint"
-  #                 - "ecs:Poll"
-  #                 - "ecs:RegisterContainerInstance"
-  #                 - "ecs:StartTelemetrySession"
-  #                 - "ecs:Submit*"
-  #                 - "logs:CreateLogStream"
-  #                 - "logs:PutLogEvents"
-  #                 - "ecr:GetAuthorizationToken"
-  #                 - "ecr:BatchGetImage"
-  #                 - "ecr:GetDownloadUrlForLayer"
-  #                 - ssm:*
-  #                 - ec2:*
-  #               Resource: "*"
+  SourceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Sub ${param:resourceprefix}internal-sg
+      GroupName: !Sub ${param:resourceprefix}ecs-service
+      VpcId: !ImportValue ${param:mainStackName}VPC
+      SecurityGroupIngress:
+        - CidrIp: '10.10.0.0/16'
+          IpProtocol: 'TCP'
+          FromPort: 0
+          ToPort: 65535
+

@@ -1,0 +1,99 @@
+service: serverless
+
+provider:
+  name: aws
+  stage: ${env:RELEASE_STAGE, 'prod'}
+  region: ${env:AWS_REGION, 'eu-west-1'}
+
+params:
+  default:
+    resourcenamespace: '${self:service}-${sls:stage}'
+    resourceprefix: '${param:resourcenamespace}-'
+
+package:
+  include:
+    - 'node_modules/**'
+    - 'lambda/**'
+  exclude:
+    - '**/*'
+
+functions:
+  ServiceA:
+    handler: lambda/serviceA.handler
+    name: ${param:resourceprefix}serviceA
+    memorySize: 128
+    role: !GetAtt LambdaRole.Arn
+    runtime: nodejs16.x
+    timeout: 30
+    environment:
+      QUEUE_URL: !Ref DefaultQueue
+    events:
+      - http:
+          path: send
+          method: get
+
+  serviceB:
+    handler: lambda/serviceB.handler
+    name: ${param:resourceprefix}serviceB
+    role: !GetAtt LambdaRole.Arn
+    runtime: nodejs16.x
+    timeout: 29
+    memorySize: 512
+    events:
+      - sqs:
+          batchSize: 1
+          arn:
+            Fn::GetAtt:
+              - DefaultQueue
+              - Arn
+      - http:
+          path: count
+          method: get
+
+
+resources:
+  Resources:
+    DefaultQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${param:resourcenamespace}-default
+        ReceiveMessageWaitTimeSeconds: 20
+        VisibilityTimeout: 30
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt DefaultQueueDLQ.Arn
+          maxReceiveCount: 10
+
+    DefaultQueueDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${param:resourcenamespace}-default-DLQ
+        ReceiveMessageWaitTimeSeconds: 20
+        VisibilityTimeout: 30
+
+    LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: ${param:resourcenamespace}-lambda-policy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Resource: '*'
+                  Effect: Allow
+                  Action:
+                    - logs:CreateLogStream
+                    - logs:CreateLogGroup
+                    - logs:PutLogEvents
+                    - rds-data:ExecuteStatement
+                    - secretsmanager:*
+                    - sqs:*
+                    - ec2:*
+                    - vpc:*

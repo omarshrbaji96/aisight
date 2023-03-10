@@ -1,24 +1,20 @@
 service: env
 
-# configValidationMode: error
 provider:
   name: aws
-  stage: ${env:RELEASE_STAGE, 'stage'}
+  stage: ${env:RELEASE_STAGE, 'stage1'}
   region: ${env:AWS_REGION, 'eu-west-1'}
 
 params:
   default:
     resourcenamespace: '${self:service}-${sls:stage}'
     resourceprefix: '${param:resourcenamespace}-'
-
     githubBranch: 'master'
     githubToken: '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'
-    mainStackName: aisight-
-    serviceDesiredCount: ${env:SERVICE_COUNT, 1}
-#    virginiaCertificateArn: arn:aws:acm:us-east-1:704225478571:certificate/b830bbdc-ea9a-43d1-8fab-432a9890a82e
-
+    mainStackName: aisight13-
+    serviceDesiredCount: ${env:SERVICE_COUNT, 0}
     appTaskDifinitionCpu: 0.5vCPU
     appTaskDifinitionMemory: 1GB
 
 resources:
-  - ${file(resources/backend.yml)}
+  - ${file(resources/resources.yml)}

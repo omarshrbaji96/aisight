@@ -2,7 +2,7 @@ service: main
 
 provider:
   name: aws
-  stage: ${env:RELEASE_STAGE, 'aisight'}
+  stage: ${env:RELEASE_STAGE, 'aisight13'}
   region: ${env:AWS_REGION, 'eu-west-1'}
 
 params:
@@ -10,16 +10,10 @@ params:
     vpcSecondDigitCidrBlock: 10
     resourcenamespace: '${self:service}-${sls:stage}'
     resourceprefix: '${param:resourcenamespace}-'
-    rootDomain: dev.toters-api.dev
 
 resources:
   - ${file(resources/vpc.yml)}
-  - ${file(resources/resources.yml)}
   - Outputs:
-      RESOURCENAMESPACE:
-        Value: ${param:resourcenamespace}
-        Export:
-          Name: RESOURCE-NAMESPACE
       VpcOutput:
         Value: !Ref VPC
         Export:
@@ -48,15 +42,3 @@ resources:
         Value: !Ref SubnetCPrivate
         Export:
           Name: ${sls:stage}-SubnetCPrivate
-      SourceSecurityGroup:
-        Value: !Ref SourceSecurityGroup
-        Export:
-          Name: ${sls:stage}-InternalSecurityGroup
-      SubnetGroup:
-        Value: !Ref SubnetGroup
-        Export:
-          Name: ${sls:stage}-SubnetGroup
-      ArtifactBucket:
-        Value: !Ref ArtifactBucket
-        Export:
-          Name: ${sls:stage}-ArtifactBucket
